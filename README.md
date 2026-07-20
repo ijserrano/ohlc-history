@@ -1,4 +1,4 @@
-# OHLC Tape — histórico multi-par vía Twelve Data
+# OHLC History — histórico multi-par vía Twelve Data
 
 Dashboard estático (para GitHub Pages) que muestra OHLC diario/semanal de varios
 pares, incluyendo XAUUSD, usando la [API de Twelve Data](https://twelvedata.com/docs)
