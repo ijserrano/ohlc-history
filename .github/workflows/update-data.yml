@@ -20,6 +20,8 @@ jobs:
           python-version: '3.12'
 
       - name: Fetch data
+        env:
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
         run: python fetch_data.py
 
       - name: Commit changes if any
