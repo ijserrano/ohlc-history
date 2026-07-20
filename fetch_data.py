@@ -1,113 +1,126 @@
 """
-Descarga históricos OHLC (diario y semanal) desde la API pública (no oficial,
-sin API key) de Yahoo Finance, y los guarda como JSON en data/. Pensado para
-ejecutarse a mano o vía GitHub Actions (ver .github/workflows/update-data.yml).
+Descarga históricos OHLC (diario y semanal) desde la API de Twelve Data y los
+guarda como JSON en data/. Pensado para ejecutarse vía GitHub Actions, con la
+API key inyectada como GitHub Secret (ver .github/workflows/update-data.yml).
 
-Nota: es el mismo endpoint que usa por debajo la librería `yfinance`. No
-requiere key, pero es no-oficial: puede cambiar sin aviso. Si un día deja de
-responder, hay que buscar alternativa (ver conversación / README).
+La key NUNCA se escribe en este fichero ni en el repo: se lee de la variable
+de entorno TWELVEDATA_API_KEY en tiempo de ejecución.
 
-Uso:
+Uso local:
+    export TWELVEDATA_API_KEY="tu_key"
     python fetch_data.py
 """
 
-import datetime
 import json
 import os
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
-# Etiqueta mostrada -> símbolo Yahoo Finance.
+# Etiqueta mostrada -> símbolo Twelve Data.
 SYMBOLS = {
-    "XAUUSD": "XAUUSD=X",
-    "EURUSD": "EURUSD=X",
-    "AUDNZD": "AUDNZD=X",
-    "GBPUSD": "GBPUSD=X",
+    "XAUUSD": "XAU/USD",
+    "EURUSD": "EUR/USD",
+    "AUDNZD": "AUD/NZD",
+    "GBPUSD": "GBP/USD",
 }
 
-# interval Yahoo -> etiqueta usada en el nombre de fichero, y rango a pedir.
+# interval Twelve Data -> etiqueta usada en el nombre de fichero.
 INTERVALS = {
-    "1d": {"label": "1d", "range": "5y"},
-    "1wk": {"label": "1wk", "range": "10y"},
+    "1day": "1d",
+    "1week": "1wk",
 }
+
+OUTPUT_SIZE = 5000  # máximo de velas por petición
+
+# Free tier: 8 peticiones/min. Tenemos 8 llamadas exactas (4 pares x 2
+# intervalos), así que espaciamos un poco para no rozar el límite.
+SLEEP_BETWEEN_CALLS = 8  # segundos
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
-HEADERS = {
-    # Yahoo bloquea el User-Agent por defecto de urllib en algunos casos.
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    )
-}
 
-
-def fetch_yahoo(symbol, interval, range_):
-    url = (
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        f"?interval={interval}&range={range_}"
+def fetch_twelvedata(api_key, symbol, interval, outputsize):
+    params = urllib.parse.urlencode(
+        {
+            "symbol": symbol,
+            "interval": interval,
+            "outputsize": outputsize,
+            "apikey": api_key,
+            "order": "ASC",
+        }
     )
-    req = urllib.request.Request(url, headers=HEADERS)
+    url = f"https://api.twelvedata.com/time_series?{params}"
+
+    req = urllib.request.Request(url)
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")[:300]
         raise RuntimeError(f"HTTP {exc.code}: {body}") from exc
 
     data = json.loads(raw)
-    chart = data.get("chart", {})
-    if chart.get("error"):
-        raise RuntimeError(str(chart["error"]))
+    if data.get("status") == "error":
+        raise RuntimeError(data.get("message", "error desconocido de Twelve Data"))
 
-    result = (chart.get("result") or [None])[0]
-    if not result:
-        raise RuntimeError(f"respuesta sin 'result': {raw[:300]}")
-
-    timestamps = result.get("timestamp") or []
-    quote = (result.get("indicators", {}).get("quote") or [{}])[0]
-
-    n = len(timestamps)
-    opens = quote.get("open") or [None] * n
-    highs = quote.get("high") or [None] * n
-    lows = quote.get("low") or [None] * n
-    closes = quote.get("close") or [None] * n
-    volumes = quote.get("volume") or [None] * n
-
+    values = data.get("values", [])
     candles = []
-    for i, ts in enumerate(timestamps):
-        o, h, l, c = opens[i], highs[i], lows[i], closes[i]
-        if None in (o, h, l, c):
+    for v in values:
+        try:
+            candles.append(
+                {
+                    "date": v["datetime"][:10],
+                    "o": float(v["open"]),
+                    "h": float(v["high"]),
+                    "l": float(v["low"]),
+                    "c": float(v["close"]),
+                    "v": float(v["volume"]) if v.get("volume") else None,
+                }
+            )
+        except (KeyError, ValueError):
             continue
-        date = datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
-        candles.append({"date": date, "o": o, "h": h, "l": l, "c": c, "v": volumes[i]})
-
     return candles
 
 
 def main():
+    api_key = os.environ.get("TWELVEDATA_API_KEY")
+    if not api_key:
+        print("ERROR: falta la variable de entorno TWELVEDATA_API_KEY", file=sys.stderr)
+        sys.exit(1)
+
     os.makedirs(OUT_DIR, exist_ok=True)
     any_failed = False
+    calls_made = 0
+    total_calls = len(SYMBOLS) * len(INTERVALS)
 
-    for label, yahoo_symbol in SYMBOLS.items():
-        for interval, cfg in INTERVALS.items():
+    for label, symbol in SYMBOLS.items():
+        for interval, file_label in INTERVALS.items():
+            if calls_made > 0:
+                time.sleep(SLEEP_BETWEEN_CALLS)
+            calls_made += 1
+
             try:
-                candles = fetch_yahoo(yahoo_symbol, interval, cfg["range"])
+                candles = fetch_twelvedata(api_key, symbol, interval, OUTPUT_SIZE)
             except Exception as exc:  # noqa: BLE001
-                print(f"ERROR {label} {cfg['label']}: {exc}", file=sys.stderr)
+                print(f"ERROR {label} {file_label}: {exc}", file=sys.stderr)
                 any_failed = True
                 continue
 
             if not candles:
-                print(f"WARN: sin datos para {label} {cfg['label']}", file=sys.stderr)
+                print(f"WARN: sin datos para {label} {file_label}", file=sys.stderr)
                 any_failed = True
                 continue
 
-            out_path = os.path.join(OUT_DIR, f"{label}_{cfg['label']}.json")
+            out_path = os.path.join(OUT_DIR, f"{label}_{file_label}.json")
             with open(out_path, "w") as f:
                 json.dump(candles, f)
-            print(f"OK {label} {cfg['label']}: {len(candles)} velas -> {out_path}")
+            print(
+                f"OK {label} {file_label} ({calls_made}/{total_calls}): "
+                f"{len(candles)} velas -> {out_path}"
+            )
 
     if any_failed:
         sys.exit(1)
