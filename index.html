@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OHLC Tape — OANDA</title>
+<style>
+  :root{
+    --bg: #0B0E11;
+    --panel: #12161C;
+    --panel-2: #171C24;
+    --line: #232A34;
+    --text: #E8EAED;
+    --muted: #7C8592;
+    --gold: #D4A853;
+    --up: #4CAF7D;
+    --down: #E5534B;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height:100vh;
+  }
+  .mono{ font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace; }
+
+  header{
+    padding:18px 24px;
+    border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
+  }
+  header .brand{ display:flex; align-items:center; gap:10px; }
+  header .brand .dot{ width:8px; height:8px; border-radius:50%; background:var(--gold); box-shadow:0 0 8px var(--gold); }
+  header h1{ font-size:15px; letter-spacing:.08em; text-transform:uppercase; margin:0; font-weight:600; }
+  header .sub{ color:var(--muted); font-size:12px; margin-top:2px; }
+
+  .status{ font-size:11px; color:var(--muted); }
+  .status.live{ color:var(--up); }
+  .status.err{ color:var(--down); }
+
+  .controls{
+    padding:16px 24px;
+    display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;
+    border-bottom:1px solid var(--line);
+    background:var(--panel);
+  }
+  .field{ display:flex; flex-direction:column; gap:5px; }
+  .field label{ font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .field input, .field select{
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:8px 10px;
+    border-radius:4px;
+    font-size:13px;
+    font-family: "IBM Plex Mono", monospace;
+    min-width:120px;
+  }
+  .field input:focus, .field select:focus{ outline:1px solid var(--gold); border-color:var(--gold); }
+  #instruments{ min-width:280px; }
+
+  button{
+    background:var(--gold);
+    color:#171208;
+    border:none;
+    padding:9px 18px;
+    border-radius:4px;
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:.03em;
+    cursor:pointer;
+    height:36px;
+  }
+  button:hover{ filter:brightness(1.08); }
+  button:disabled{ opacity:.5; cursor:not-allowed; }
+
+  .note{
+    padding:10px 24px;
+    font-size:11.5px;
+    color:var(--muted);
+    border-bottom:1px solid var(--line);
+    line-height:1.5;
+  }
+  .note strong{ color:var(--gold); }
+
+  main{ padding:20px 24px 60px; }
+  .grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap:16px;
+  }
+
+  .card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:6px;
+    overflow:hidden;
+  }
+  .card-head{
+    padding:12px 14px;
+    display:flex; justify-content:space-between; align-items:baseline;
+    border-bottom:1px solid var(--line);
+  }
+  .card-head .sym{ font-weight:700; letter-spacing:.03em; font-size:14px; }
+  .card-head .gran{ font-size:11px; color:var(--muted); }
+
+  .price-row{
+    padding:14px;
+    display:flex; justify-content:space-between; align-items:baseline;
+    border-bottom:1px solid var(--line);
+  }
+  .price-row .last{ font-size:22px; font-weight:600; }
+  .price-row .chg{ font-size:12px; }
+  .price-row .chg.up{ color:var(--up); }
+  .price-row .chg.down{ color:var(--down); }
+
+  .hl-row{
+    display:flex; justify-content:space-between;
+    padding:10px 14px;
+    font-size:11px;
+    color:var(--muted);
+    border-bottom:1px solid var(--line);
+  }
+  .hl-row span b{ color:var(--text); font-weight:600; }
+
+  table{ width:100%; border-collapse:collapse; font-size:11px; }
+  thead th{
+    text-align:right;
+    color:var(--muted);
+    font-weight:500;
+    padding:6px 10px;
+    border-bottom:1px solid var(--line);
+    text-transform:uppercase;
+    font-size:9.5px;
+    letter-spacing:.04em;
+  }
+  thead th:first-child, tbody td:first-child{ text-align:left; }
+  tbody td{ text-align:right; padding:5px 10px; }
+  tbody tr:nth-child(odd){ background:rgba(255,255,255,0.015); }
+  tbody tr:hover{ background:rgba(212,168,83,0.06); }
+  .up{ color:var(--up); }
+  .down{ color:var(--down); }
+
+  .empty{
+    padding:60px 20px; text-align:center; color:var(--muted); font-size:13px;
+  }
+  .card-err{ padding:14px; color:var(--down); font-size:12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="brand"><span class="dot"></span><h1>OHLC Tape</h1></div>
+    <div class="sub">históricos locales (Stooq) · sin API key · multi-par</div>
+  </div>
+  <div id="status" class="status">sin conectar</div>
+</header>
+
+<div class="note">
+  Datos históricos (diario / semanal), sin API key y sin llamadas externas al cargar la página:
+  lee los ficheros <span class="mono">data/*.json</span> del propio repo, generados por <span class="mono">fetch_data.py</span>
+  (fuente: Stooq) y actualizados automáticamente cada día vía GitHub Actions.
+</div>
+
+<div class="controls">
+  <div class="field">
+    <label for="instruments">Pares (deben existir en data/, separados por coma)</label>
+    <input id="instruments" type="text" value="XAUUSD,EURUSD,AUDNZD,GBPUSD" style="min-width:320px;">
+  </div>
+  <div class="field">
+    <label for="granularity">Temporalidad</label>
+    <select id="granularity">
+      <option value="1d" selected>D1</option>
+      <option value="1wk">W1</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="count">Nº de velas</label>
+    <input id="count" type="number" value="20" min="1" max="500" style="width:80px;">
+  </div>
+  <button id="fetchBtn">Cargar datos</button>
+</div>
+
+<main>
+  <div id="grid" class="grid">
+    <div class="empty">Introduce tu API key de OANDA y pulsa "Cargar datos".</div>
+  </div>
+</main>
+
+<script>
+const fetchBtn = document.getElementById('fetchBtn');
+const statusEl = document.getElementById('status');
+const gridEl = document.getElementById('grid');
+
+function setStatus(text, cls){
+  statusEl.textContent = text;
+  statusEl.className = 'status' + (cls ? ' ' + cls : '');
+}
+
+function fmt(n, digits){
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  return Number(n).toFixed(digits);
+}
+
+function decimalsFor(symbol){
+  if (symbol.includes('JPY')) return 3;
+  if (symbol.startsWith('XAU') || symbol.startsWith('XAG')) return 2;
+  return 5;
+}
+
+async function loadLocalCandles(symbol, intervalLabel){
+  const path = `data/${symbol}_${intervalLabel}.json`;
+  const res = await fetch(path, { cache: 'no-store' });
+  if (!res.ok){
+    throw new Error(`no existe ${path} (¿corriste fetch_data.py?)`);
+  }
+  return res.json(); // [{date, o, h, l, c, v}, ...] ordenado ascendente por fecha
+}
+
+function renderCard(symbol, intervalLabel, candles, count, digits){
+  const useCandles = candles.slice(-count);
+  if (!useCandles.length){
+    return `<div class="card"><div class="card-head"><span class="sym mono">${symbol}</span></div><div class="card-err">Sin velas en el fichero local.</div></div>`;
+  }
+
+  const last = useCandles[useCandles.length - 1];
+  const prev = useCandles.length > 1 ? useCandles[useCandles.length - 2] : last;
+  const chg = last.c - prev.c;
+  const chgPct = prev.c ? (chg / prev.c) * 100 : 0;
+  const chgCls = chg >= 0 ? 'up' : 'down';
+
+  const highs = useCandles.map(c => c.h);
+  const lows = useCandles.map(c => c.l);
+  const rangeHigh = Math.max(...highs);
+  const rangeLow = Math.min(...lows);
+
+  const rowsHtml = useCandles.slice().reverse().map(c => {
+    const dir = c.c >= c.o ? 'up' : 'down';
+    return `<tr>
+      <td class="mono">${c.date}</td>
+      <td class="mono">${fmt(c.o, digits)}</td>
+      <td class="mono">${fmt(c.h, digits)}</td>
+      <td class="mono">${fmt(c.l, digits)}</td>
+      <td class="mono ${dir}">${fmt(c.c, digits)}</td>
+      <td class="mono">${c.v ?? '—'}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="card">
+    <div class="card-head">
+      <span class="sym mono">${symbol}</span>
+      <span class="gran">${intervalLabel === '1d' ? 'D1' : 'W1'} · ${useCandles.length} velas</span>
+    </div>
+    <div class="price-row">
+      <span class="last mono">${fmt(last.c, digits)}</span>
+      <span class="chg mono ${chgCls}">${chg >= 0 ? '+' : ''}${fmt(chg, digits)} (${chgPct >= 0 ? '+' : ''}${fmt(chgPct, 2)}%)</span>
+    </div>
+    <div class="hl-row">
+      <span>High (${useCandles.length}v) <b class="mono">${fmt(rangeHigh, digits)}</b></span>
+      <span>Low (${useCandles.length}v) <b class="mono">${fmt(rangeLow, digits)}</b></span>
+    </div>
+    <table>
+      <thead><tr><th>Fecha</th><th>O</th><th>H</th><th>L</th><th>C</th><th>Vol</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  </div>`;
+}
+
+async function loadAll(){
+  const intervalLabel = document.getElementById('granularity').value; // '1d' | '1wk'
+  const count = parseInt(document.getElementById('count').value, 10) || 20;
+  const instruments = document.getElementById('instruments').value
+    .split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+
+  if (!instruments.length){
+    setStatus('falta al menos un par', 'err');
+    return;
+  }
+
+  fetchBtn.disabled = true;
+  setStatus('cargando…');
+  gridEl.innerHTML = '';
+
+  const results = await Promise.all(instruments.map(async (sym) => {
+    try{
+      const candles = await loadLocalCandles(sym, intervalLabel);
+      return renderCard(sym, intervalLabel, candles, count, decimalsFor(sym));
+    }catch(err){
+      return `<div class="card"><div class="card-head"><span class="sym mono">${sym}</span></div><div class="card-err">${err.message}</div></div>`;
+    }
+  }));
+
+  gridEl.innerHTML = results.join('');
+  fetchBtn.disabled = false;
+  setStatus(`cargado ${new Date().toLocaleTimeString('es-ES')}`, 'live');
+}
+
+fetchBtn.addEventListener('click', loadAll);
+</script>
+</body>
+</html>
