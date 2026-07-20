@@ -22,13 +22,12 @@ import urllib.request
 # Etiqueta mostrada -> símbolo Twelve Data.
 SYMBOLS = {
     "XAUUSD": "XAU/USD",
-    "EURUSD": "EUR/USD",
-    "AUDNZD": "AUD/NZD",
-    "GBPUSD": "GBP/USD",
 }
 
 # interval Twelve Data -> etiqueta usada en el nombre de fichero.
 INTERVALS = {
+    "1h": "1h",
+    "4h": "4h",
     "1day": "1d",
     "1week": "1wk",
 }
@@ -72,7 +71,7 @@ def fetch_twelvedata(api_key, symbol, interval, outputsize):
         try:
             candles.append(
                 {
-                    "date": v["datetime"][:10],
+                    "date": v["datetime"],
                     "o": float(v["open"]),
                     "h": float(v["high"]),
                     "l": float(v["low"]),

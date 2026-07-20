@@ -53,13 +53,19 @@ de la página, o cambia el valor por defecto en `index.html`.
 
 ## Notas
 
-- Free tier: **8 peticiones/min, 800/día**. Con 4 pares × 2 intervalos son
-  exactamente 8 llamadas por ejecución — el script mete una pausa de 8s
-  entre cada una para no rozar el límite. Si añades más pares, ajusta
-  `SLEEP_BETWEEN_CALLS` o reparte las llamadas en varias ejecuciones.
-- Si más adelante quieres intradía (1min, 15min, 1h...), añádelo a
-  `INTERVALS` — Twelve Data lo soporta igual de fácil, aunque en el free
-  tier el histórico intradía suele estar más limitado en profundidad que
-  el diario/semanal.
+- Por ahora solo se descarga **XAUUSD**. Para añadir más pares, agrégalos
+  al diccionario `SYMBOLS` en `fetch_data.py` (formato Twelve Data, con
+  barra — ej. `EUR/USD`) y al campo "Pares" de `index.html`.
+- Free tier: **8 peticiones/min, 800/día**. Con 1 par × 4 intervalos (H1,
+  H4, D1, W1) son 4 llamadas por ejecución — el script mete una pausa de
+  8s entre cada una para no rozar el límite de 8/min. Si añades más pares
+  o temporalidades, ajusta `SLEEP_BETWEEN_CALLS` o reparte las llamadas en
+  varias ejecuciones.
+- En el free tier, el histórico intradía (H1/H4) suele tener menos
+  profundidad que D1/W1 (normalmente varios meses hacia atrás, no años) —
+  no es un error si ves menos velas ahí que en diario.
 - `outputsize=5000` es el máximo por petición; si Twelve Data devuelve menos
-  para algún par (histórico más corto o límite del plan), no es un error.
+  para algún par/intervalo (histórico más corto o límite del plan), no es
+  un error del script.
+
+

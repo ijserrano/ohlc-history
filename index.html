@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OHLC Tape — OANDA</title>
+<title>OHLC Tape</title>
 <style>
   :root{
     --bg: #0B0E11;
@@ -76,15 +76,6 @@
   button:hover{ filter:brightness(1.08); }
   button:disabled{ opacity:.5; cursor:not-allowed; }
 
-  .note{
-    padding:10px 24px;
-    font-size:11.5px;
-    color:var(--muted);
-    border-bottom:1px solid var(--line);
-    line-height:1.5;
-  }
-  .note strong{ color:var(--gold); }
-
   main{ padding:20px 24px 60px; }
   .grid{
     display:grid;
@@ -154,26 +145,22 @@
 <header>
   <div>
     <div class="brand"><span class="dot"></span><h1>OHLC Tape</h1></div>
-    <div class="sub">históricos locales (Stooq) · sin API key · multi-par</div>
+    <div class="sub">multi-par · multi-temporalidad</div>
   </div>
   <div id="status" class="status">sin conectar</div>
 </header>
 
-<div class="note">
-  Datos históricos (diario / semanal), sin API key y sin llamadas externas al cargar la página:
-  lee los ficheros <span class="mono">data/*.json</span> del propio repo, generados por <span class="mono">fetch_data.py</span>
-  (fuente: Stooq) y actualizados automáticamente cada día vía GitHub Actions.
-</div>
-
 <div class="controls">
   <div class="field">
-    <label for="instruments">Pares (deben existir en data/, separados por coma)</label>
-    <input id="instruments" type="text" value="XAUUSD,EURUSD,AUDNZD,GBPUSD" style="min-width:320px;">
+    <label for="instruments">Pares</label>
+    <input id="instruments" type="text" value="XAUUSD" style="min-width:320px;">
   </div>
   <div class="field">
     <label for="granularity">Temporalidad</label>
     <select id="granularity">
-      <option value="1d" selected>D1</option>
+      <option value="1h" selected>H1</option>
+      <option value="4h">H4</option>
+      <option value="1d">D1</option>
       <option value="1wk">W1</option>
     </select>
   </div>
@@ -186,7 +173,7 @@
 
 <main>
   <div id="grid" class="grid">
-    <div class="empty">Introduce tu API key de OANDA y pulsa "Cargar datos".</div>
+    <div class="empty">Elige pares y temporalidad, y pulsa "Cargar datos".</div>
   </div>
 </main>
 
@@ -194,6 +181,8 @@
 const fetchBtn = document.getElementById('fetchBtn');
 const statusEl = document.getElementById('status');
 const gridEl = document.getElementById('grid');
+
+const GRAN_LABELS = { '1h':'H1', '4h':'H4', '1d':'D1', '1wk':'W1' };
 
 function setStatus(text, cls){
   statusEl.textContent = text;
@@ -215,15 +204,15 @@ async function loadLocalCandles(symbol, intervalLabel){
   const path = `data/${symbol}_${intervalLabel}.json`;
   const res = await fetch(path, { cache: 'no-store' });
   if (!res.ok){
-    throw new Error(`no existe ${path} (¿corriste fetch_data.py?)`);
+    throw new Error(`sin datos para ${symbol} (${GRAN_LABELS[intervalLabel] || intervalLabel})`);
   }
-  return res.json(); // [{date, o, h, l, c, v}, ...] ordenado ascendente por fecha
+  return res.json(); // [{date, o, h, l, c, v}, ...] ordenado ascendente
 }
 
 function renderCard(symbol, intervalLabel, candles, count, digits){
   const useCandles = candles.slice(-count);
   if (!useCandles.length){
-    return `<div class="card"><div class="card-head"><span class="sym mono">${symbol}</span></div><div class="card-err">Sin velas en el fichero local.</div></div>`;
+    return `<div class="card"><div class="card-head"><span class="sym mono">${symbol}</span></div><div class="card-err">Sin velas disponibles.</div></div>`;
   }
 
   const last = useCandles[useCandles.length - 1];
@@ -239,8 +228,9 @@ function renderCard(symbol, intervalLabel, candles, count, digits){
 
   const rowsHtml = useCandles.slice().reverse().map(c => {
     const dir = c.c >= c.o ? 'up' : 'down';
+    const label = c.date || c.time || '';
     return `<tr>
-      <td class="mono">${c.date}</td>
+      <td class="mono">${label}</td>
       <td class="mono">${fmt(c.o, digits)}</td>
       <td class="mono">${fmt(c.h, digits)}</td>
       <td class="mono">${fmt(c.l, digits)}</td>
@@ -253,7 +243,7 @@ function renderCard(symbol, intervalLabel, candles, count, digits){
   <div class="card">
     <div class="card-head">
       <span class="sym mono">${symbol}</span>
-      <span class="gran">${intervalLabel === '1d' ? 'D1' : 'W1'} · ${useCandles.length} velas</span>
+      <span class="gran">${GRAN_LABELS[intervalLabel] || intervalLabel} · ${useCandles.length} velas</span>
     </div>
     <div class="price-row">
       <span class="last mono">${fmt(last.c, digits)}</span>
@@ -271,7 +261,7 @@ function renderCard(symbol, intervalLabel, candles, count, digits){
 }
 
 async function loadAll(){
-  const intervalLabel = document.getElementById('granularity').value; // '1d' | '1wk'
+  const intervalLabel = document.getElementById('granularity').value;
   const count = parseInt(document.getElementById('count').value, 10) || 20;
   const instruments = document.getElementById('instruments').value
     .split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
